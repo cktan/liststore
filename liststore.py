@@ -93,61 +93,63 @@ class ListStore:
         self.s3_bucket_name = s3_bucket
         self.aws_access_key = aws_access_key
         self.aws_secret_key = aws_secret_key
-        self._s3_bucket = None
-        self._s3_conn = None
-        self._rconn = None
+        self.s3_bucket = None
+        self.s3_conn = None
+        self.rconn = None
 
     ### ------------------------------------------
-    def s3_bucket(self):
-        if not self._s3_conn:
-            self._s3_conn = boto.connect_s3(self.aws_access_key, self.aws_secret_key)
-        if not self._s3_bucket:
-            self._s3_bucket = self._s3_conn.get_bucket(self.s3_bucket_name)
-        return self._s3_bucket
+    def __s3_bucket_handle(self):
+        if not self.s3_conn:
+            self.s3_conn = boto.connect_s3(self.aws_access_key, self.aws_secret_key)
+        if not self.s3_bucket:
+            self.s3_bucket = self.s3_conn.get_bucket(self.s3_bucket_name)
+        return self.s3_bucket
 
     ### ------------------------------------------
-    def s3_key(self, keystr):
-        bkt = self.s3_bucket()
+    def __s3_key_handle(self, keystr):
+        bkt = self.__s3_bucket_handle()
         kk = boto.s3.key.Key(bkt)
         kk.key = keystr
         return kk
 
     ### ------------------------------------------
-    def rconn(self):
-        if not self._rconn:
-            self._rconn = redis.StrictRedis(self.redis_host, self.redis_port)
-        return self._rconn
+    def __rconn(self):
+        if not self.rconn:
+            self.rconn = redis.StrictRedis(self.redis_host, self.redis_port)
+        return self.rconn
     
     ### ------------------------------------------
-    def rget(self, k):
-        return self.rconn().get('liststore::' + k)
+    def __rget(self, k):
+        return self.__rconn().get('liststore::' + k)
 
     ### ------------------------------------------
-    def rset(self, k, z):
-        return self.rconn().set('liststore::' + k, z)
+    def __rset(self, k, z):
+        return self.__rconn().setex('liststore::' + k, 30 * 24 * 60 * 60, z)
 
     ### ------------------------------------------
-    def rdelete(self, k):
-        return self.rconn().delete('liststore::' + k)
+    def __rdelete(self, k):
+        return self.__rconn().delete('liststore::' + k)
+
 
     ### ------------------------------------------
-    def _write(self, k, s):
+    def __write(self, k, s):
         k = k + '.gz'
-        kk = self.s3_key(k)
+        kk = self.__s3_key_handle(k)
         z = compress(s)
         kk.set_contents_from_string(z)
         
         # put (k, z) in redis
-        self.rset(k, z)
+        self.__rset(k, z)
 
     ### ------------------------------------------
-    def _read(self, k):
+    def __read(self, k):
         k = k + '.gz'
-        z = self.rget(k)
+        z = self.__rget(k)
         if not z:
-            kk = self.s3_key(k)
+            kk = self.__s3_key_handle(k)
             try:
                 z = kk.get_contents_as_string()
+                self.__rset(k, z)
             except boto.exception.S3ResponseError as e:
                 if e.status == 404:
                     z = ''
@@ -156,24 +158,28 @@ class ListStore:
         return z and uncompress(z) or ''
 
     ### ------------------------------------------
-    def _readIndexPage(self, name):
-        return ListStoreIndexPage(self._read(name))
+    def __readIndexPage(self, name):
+        return ListStoreIndexPage(self.__read(name))
 
     ### ------------------------------------------
-    def _writeIndexPage(self, name, ip):
-        return self._write(name, ip.toJson())
+    def __writeIndexPage(self, name, ip):
+        return self.__write(name, ip.toJson())
 
     ### ------------------------------------------
-    def _readDataPage(self, name, yyyymm):
-        ip = self._readIndexPage(name)
-        if not ip.find(yyyymm):
+    def __readDataPage(self, name, yyyymm):
+        ip = self.__readIndexPage(name)
+        r = ip.find(yyyymm)
+        if not r:
             return ListStoreDataPage('')
-        return ListStoreDataPage(self._read(name + '/' + yyyymm))
-        
+        dp = ListStoreDataPage(self.__read(name + '/' + yyyymm))
+        # fix up dp to be consistent with r
+        if len(dp.rows) > r['total']:
+            dp.rows = dp.rows[:r['total']]
+        return dp
 
     ### ------------------------------------------
-    def _writeDataPage(self, name, yyyymm, dp):
-        ip = self._readIndexPage(name)
+    def __writeDataPage(self, name, yyyymm, dp):
+        ip = self.__readIndexPage(name)
         # compute total, seen, dismissed, ctime_max
         seen, dismissed = 0, 0
         total = len(dp.rows)
@@ -193,28 +199,28 @@ class ListStore:
             ip.ymtab.insert(i, r)
 
         # write data page to s3
-        self._write(name + '/' + yyyymm, dp.toJson())
+        self.__write(name + '/' + yyyymm, dp.toJson())
 
         # write index page to s3
-        self._writeIndexPage(name, ip)
+        self.__writeIndexPage(name, ip)
         
 
     ### ------------------------------------------
-    def _append(self, name, yyyymm, rows):
+    def __append(self, name, yyyymm, rows):
         # sort by ctime
         rows.sort(key = lambda x: x[0])
 
-        ip = self._readIndexPage(name)
-        if ip.ymtab:
-            last = ip.ymtab[-1]
-            if last['ctime_max'] >= rows[0][0]:
+        ip = self.__readIndexPage(name)
+        for i in xrange(len(ip.ymtab)-1, -1, -1):
+            last = ip.ymtab[i]
+            if last['total'] > 0 and last['ctime_max'] >= rows[0][0]:
                 raise DataError('ctime ' + time.asctime(time.gmtime(rows[0][0])) + ' is younger than current last record')
 
         # read the page, append, and write it
-        dp = self._readDataPage(name, yyyymm)
+        dp = self.__readDataPage(name, yyyymm)
         for (ctime, content) in rows:
             dp.rows += [ {'ctime':ctime, 'content':content, 'seen':0, 'dismissed':0} ]
-        self._writeDataPage(name, yyyymm, dp)
+        self.__writeDataPage(name, yyyymm, dp)
 
     ### ------------------------------------------
     def append(self, name, rows):
@@ -229,36 +235,67 @@ class ListStore:
             else:
                 g[yyyymm] = [i]
         for yyyymm in sorted(g.keys()):
-            self._append(name, yyyymm, g[yyyymm])
+            self.__append(name, yyyymm, g[yyyymm])
 
     ### ------------------------------------------
     def delete(self, name, ctime):
-        ip = self._readIndexPage(name)
+        ip = self.__readIndexPage(name)
         yyyymm = unixTimeToYYYYMM(ctime)
         r = ip.find(yyyymm)
         if r:
-            dp = self._readDataPage(name, yyyymm)
+            dp = self.__readDataPage(name, yyyymm)
             (i, found) = dp.index(ctime)
             if found:
-                print 'deleting', dp.rows[i]
                 del dp.rows[i]
-                self._writeDataPage(name, yyyymm, dp)
+                self.__writeDataPage(name, yyyymm, dp)
+
+    ### ------------------------------------------
+    def __setFlag(self, name, flag, ctime, prior):
+        ip = self.__readIndexPage(name)
+        yyyymm = unixTimeToYYYYMM(ctime)
+        if not prior:
+            r = ip.find(yyyymm)
+            if r: 
+                dp = self.__readDataPage(name, yyyymm)
+                r = dp.find(ctime)
+                if r and not r[flag]:
+                    r[flag] = 1
+                    self.__writeDataPage(name, yyyymm, dp)
+            return
+
+        # prior is True
+        (i, found) = ip.index(yyyymm)
+        if not found:
+            i = i - 1
+        for i in xrange(i, -1, -1):
+            yyyymm = ip.ymtab[i]['yyyymm']
+            dp = self.__readDataPage(name, yyyymm)
+            (j, found) = dp.index(ctime)
+            if not found:
+                j = j - 1
+            dirty = 0
+            for j in xrange(j, -1, -1):
+                if not dp.rows[j][flag]:
+                    dp.rows[j][flag] = 1
+                    dirty = 1
+            if dirty:
+                self.__writeDataPage(name, yyyymm, dp)
 
     ### ------------------------------------------
     def setSeen(self, name, ctime, prior=False):
-        pass
+        self.__setFlag(name, 'seen', ctime, prior)
 
     ### ------------------------------------------
     def setDismissed(self, name, ctime, prior=False):
-        pass
+        self.__setFlag(name, 'dismissed', ctime, prior)
 
     ### ------------------------------------------
     def retrieve(self, name, ctime):
-        ip = self._readIndexPage(name)
+        ip = self.__readIndexPage(name)
         yyyymm = unixTimeToYYYYMM(ctime)
         r = ip.find(yyyymm)
         if r and r['total'] > r['dismissed']:
-            dp = self._readDataPage(name, yyyymm)
+            dp = self.__readDataPage(name, yyyymm)
             r = dp.find(ctime)
             if r and not r['dismissed']:
                 return r
@@ -266,13 +303,11 @@ class ListStore:
 
     ### ------------------------------------------
     def reverseScan(self, name, ctime, limit=100, offset=0, skipSeen=0, skipDismissed=1):
-        ip = self._readIndexPage(name)
+        ip = self.__readIndexPage(name)
         yyyymm = unixTimeToYYYYMM(ctime)
-        i = ip.index(yyyymm)
-        if (i < len(ip.ymtab) and ip.ymtab[i]['yyyymm'] > yyyymm):
+        (i, found) = ip.index(yyyymm)
+        if not found:
             i = i - 1
-        if (i >= len(ip.ymtab)):
-            return []
         out = []
         for i in xrange(i, -1, -1):
             if len(out) >= limit:
@@ -281,8 +316,11 @@ class ListStore:
                 continue
             if skipSeen and ip.ymtab[i]['total'] > ip.ymtab[i]['seen']:
                 continue
-            dp = self._readDataPage(name, ip.ymtab[i]['yyyymm'])
-            for j in xrange(len(dp.rows) - 1, -1, -1):
+            dp = self.__readDataPage(name, ip.ymtab[i]['yyyymm'])
+            (j, found) = dp.index(ctime)
+            if not found:
+                j = j - 1
+            for j in xrange(j, -1, -1):
                 if len(out) >= limit:
                     break
                 if skipDismissed and dp.rows[j]['dismissed']:
@@ -295,12 +333,21 @@ class ListStore:
 
     ### ------------------------------------------
     def reset(self, name):
-        bkt = self.s3_bucket()
+        bkt = self.__s3_bucket_handle()
         rs = bkt.list(name)
         for key in rs:
+            # print 'deleting', key
             bkt.delete_key(key)
-            self.rdelete(key.name)
-            
+            self.__rdelete(key.name)
+        self.uncache(name)
+
+    ### ------------------------------------------
+    def uncache(self, name):
+        self.__rdelete('liststore::' + name + '.gz')
+        keys = self.__rconn().keys('liststore::' + name + '/*.gz')
+        # print keys
+        for k in keys:
+            self.__rdelete(k)
 
 if __name__ == '__main__':
     if not os.environ.get('AWS_ACCESS_KEY'):
@@ -310,16 +357,23 @@ if __name__ == '__main__':
     if not (2 <= len(sys.argv) and len(sys.argv) <= 4):
         sys.exit('Usage: %s bucket_name [redis_host [redis_port]]' % sys.argv[0])
 
+
+    bucketname = sys.argv[1] 
+    redis_host = len(sys.argv) >= 3 and sys.argv[2] or 'localhost'
+    redis_port = len(sys.argv) >= 4 and sys.argv[3] or 6379
+
+    ls = ListStore(bucketname,
+                   os.environ['AWS_ACCESS_KEY'], os.environ['AWS_SECRET_KEY'],
+                   redis_host, redis_port)
+    
     name = 'cktan'
-    ls = ListStore(sys.argv[1], os.environ['AWS_ACCESS_KEY'], os.environ['AWS_SECRET_KEY'],
-                   len(sys.argv) >= 3 and sys.argv[2] or 'localhost',
-                   len(sys.argv) >= 4 and sys.argv[3] or 6379)
-    # ls.reset(name)
+    start = calendar.timegm(time.strptime('20130101', '%Y%m%d'))
+    
+    # fresh start for test
+    ls.uncache(name)
+    ls.reset(name)
 
     # insert one item per day for the whole year in batches of 1, 2, 4, 8, 16, 64
-    start = calendar.timegm(time.strptime('20130101', '%Y%m%d'))
-    for i in xrange(365):
-        ls.delete(start + i * (24 * 60 * 60)
     i = 0
     while i < 365:
         out = []
@@ -333,4 +387,65 @@ if __name__ == '__main__':
             for x in out:
                 print ls.retrieve(name, x[0])
 
+    testDelete = False
+    if testDelete: 
+        # delete all
+        for i in xrange(365):
+            ls.delete(name, start + i * (24 * 60 * 60))
+
+        # again:
+        # insert one item per day for the whole year in batches of 1, 2, 4, 8, 16, 64
+        i = 0
+        while i < 365:
+            out = []
+            for j in xrange(1 << (i % 7)):
+                if i >= 365: break
+                t = start + i * (24 * 60 * 60)
+                out += [(t, 'hello ' + time.asctime(time.gmtime(t)))]
+                i = i + 1
+            if out:
+                ls.append(name, out)
+                for x in out:
+                    print ls.retrieve(name, x[0])
+
+    # dismiss March 31
+    mar31 = calendar.timegm(time.strptime('20130331', '%Y%m%d'))
+    ls.setDismissed(name, mar31, prior=False)
+    r = ls.retrieve(name, mar31)
+    assert r == None, 'Dismissed record is not dismissed'
     
+    # dismiss everything on and before Feb 14
+    feb14 = calendar.timegm(time.strptime('20130214', '%Y%m%d'))
+    ls.setDismissed(name, feb14, prior=True)
+    r = ls.retrieve(name, feb14)
+    assert r == None, 'Dismissed record is not dismissed'
+    jan10 = calendar.timegm(time.strptime('20130110', '%Y%m%d'))
+    r = ls.retrieve(name, jan10)
+    assert r == None, 'Dismissed record is not dismissed'
+    
+    # seen on June 1
+    jun1 = calendar.timegm(time.strptime('20130601', '%Y%m%d'))
+    ls.setSeen(name, jun1, prior=False)
+    r = ls.retrieve(name, jun1)
+    assert r and r['seen'], 'Seen record is not seen'
+    
+    # set everything seen on and before March 14
+    mar14 = calendar.timegm(time.strptime('20130314', '%Y%m%d'))
+    ls.setSeen(name, mar14, prior=True)
+
+    # verify
+    for i in xrange(365):
+        t = start + i * 24 * 60 * 60
+        r = ls.retrieve(name, t)
+
+        if t <= feb14 or t == mar31:
+            assert r == None, 'Dismissed record is not dismissed'
+            continue
+
+        assert r != None, 'Non-dismissed record is not found'
+
+        if t <= mar14 or t == jun1:
+            assert r['seen'], 'Seen record is not seen'
+            continue
+
+        assert not r['seen'], 'Not-seen record is seen'
