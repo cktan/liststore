@@ -310,24 +310,30 @@ class ListStore:
             i = i - 1
         out = []
         for i in xrange(i, -1, -1):
-            if len(out) >= limit:
-                break
-            if skipDismissed and ip.ymtab[i]['total'] > ip.ymtab[i]['dismissed']:
+            yyyymm = ip.ymtab[i]['yyyymm']
+            print yyyymm
+            if limit <= 0: break
+            if skipDismissed and ip.ymtab[i]['total'] == ip.ymtab[i]['dismissed']:
                 continue
-            if skipSeen and ip.ymtab[i]['total'] > ip.ymtab[i]['seen']:
+            if skipSeen and ip.ymtab[i]['total'] == ip.ymtab[i]['seen']:
                 continue
-            dp = self.__readDataPage(name, ip.ymtab[i]['yyyymm'])
+            dp = self.__readDataPage(name, yyyymm)
             (j, found) = dp.index(ctime)
             if not found:
                 j = j - 1
             for j in xrange(j, -1, -1):
-                if len(out) >= limit:
-                    break
-                if skipDismissed and dp.rows[j]['dismissed']:
+                r = dp.rows[j]
+                if limit <= 0: break
+                if skipDismissed and r['dismissed']:
                     continue
-                if skipSeen and dp.rows[j]['seen']:
+                if skipSeen and r['seen']:
                     continue
+                if offset > 0:
+                    offset = offset - 1
+                    continue
+                limit = limit - 1
                 out += [r]
+                print 'len', len(out)
 
         return out
 
@@ -368,33 +374,19 @@ if __name__ == '__main__':
     
     name = 'cktan'
     start = calendar.timegm(time.strptime('20130101', '%Y%m%d'))
+    feb14 = calendar.timegm(time.strptime('20130214', '%Y%m%d'))
+    mar31 = calendar.timegm(time.strptime('20130331', '%Y%m%d'))
+    jan10 = calendar.timegm(time.strptime('20130110', '%Y%m%d'))
+    jun1 = calendar.timegm(time.strptime('20130601', '%Y%m%d'))
+    mar14 = calendar.timegm(time.strptime('20130314', '%Y%m%d'))
+    aug23 = calendar.timegm(time.strptime('20130823', '%Y%m%d'))
     
     # fresh start for test
     ls.uncache(name)
     ls.reset(name)
 
     # insert one item per day for the whole year in batches of 1, 2, 4, 8, 16, 64
-    i = 0
-    while i < 365:
-        out = []
-        for j in xrange(1 << (i % 7)):
-            if i >= 365: break
-            t = start + i * (24 * 60 * 60)
-            out += [(t, 'hello ' + time.asctime(time.gmtime(t)))]
-            i = i + 1
-        if out:
-            ls.append(name, out)
-            for x in out:
-                print ls.retrieve(name, x[0])
-
-    testDelete = False
-    if testDelete: 
-        # delete all
-        for i in xrange(365):
-            ls.delete(name, start + i * (24 * 60 * 60))
-
-        # again:
-        # insert one item per day for the whole year in batches of 1, 2, 4, 8, 16, 64
+    def testInsert():
         i = 0
         while i < 365:
             out = []
@@ -405,47 +397,104 @@ if __name__ == '__main__':
                 i = i + 1
             if out:
                 ls.append(name, out)
-                for x in out:
-                    print ls.retrieve(name, x[0])
 
-    # dismiss March 31
-    mar31 = calendar.timegm(time.strptime('20130331', '%Y%m%d'))
-    ls.setDismissed(name, mar31, prior=False)
-    r = ls.retrieve(name, mar31)
-    assert r == None, 'Dismissed record is not dismissed'
+    def testDelete():
+        # delete all
+        for i in xrange(365):
+            ls.delete(name, start + i * (24 * 60 * 60))
+
+    def testDismiss():
+        # dismiss March 31
+        print 'set dismissed for Mar 31'
+        ls.setDismissed(name, mar31, prior=False)
+        r = ls.retrieve(name, mar31)
+        assert r == None, 'Dismissed record is not dismissed'
+
+        # dismiss everything on and before Feb 14
+        print 'set dismissed all <= Feb 14'
+        ls.setDismissed(name, feb14, prior=True)
+        r = ls.retrieve(name, feb14)
+        assert r == None, 'Dismissed record is not dismissed'
+        r = ls.retrieve(name, jan10)
+        assert r == None, 'Dismissed record is not dismissed'
+
+    def testSeen():
+        # seen on June 1
+        print 'set seen for Jun 1'
+        ls.setSeen(name, jun1, prior=False)
+        r = ls.retrieve(name, jun1)
+        assert r and r['seen'], 'Seen record is not seen'
+
+        # set everything seen on and before March 14
+        print 'set seen all <= Mar 14'
+        ls.setSeen(name, mar14, prior=True)
+
+    def verifySeenAndDismissed():
+        for i in xrange(365):
+            t = start + i * 24 * 60 * 60
+            r = ls.retrieve(name, t)
+
+            if t <= feb14 or t == mar31:
+                assert r == None, 'Dismissed record is not dismissed'
+                continue
+
+            assert r != None, 'Non-dismissed record is not found'
+
+            if t <= mar14 or t == jun1:
+                assert r['seen'], 'Seen record is not seen'
+                continue
+
+            assert not r['seen'], 'Not-seen record is seen'
+
+
+    def testReverseScan():
+        out = ls.reverseScan(name, aug23, limit=300)
+        print len(out)
+        print out[-1]
+        assert out[-1]['ctime'] == feb14 + 24 * 60 * 60, 'last record should be feb15'
+
+        t = aug23
+        for r in out:
+            if t == mar31:
+                t = t - 24 * 60 * 60
+            print r
+            assert r['ctime'] == t, 'Expected ctime of %s but got %s' % (t, r['ctime'])
+            if t <= mar14 or t == jun1:
+                assert r['seen'], 'Seen record is not seen'
+            else:
+                assert not r['seen'], 'Not-seen record is seen'
+            
+
+    print 'test insert'
+    testInsert()
+
+    doTestDelete = False
+    if doTestDelete:
+        print 'test delete'
+        testDelete()
+        print 'redo insert'
+        testInsert()
+
+
+    print 'test dismiss'
+    testDismiss()
+    print 'test seen'
+    testSeen()
+    print 'verifying ...'
+    verifySeenAndDismissed()
+    print 'clear cache'
+    ls.uncache(name)
+    print 'verifying again ...'
+    verifySeenAndDismissed()
+
+    # reverse scan
+    print 'test reverse scan'
+    testReverseScan()
+
+    # clear cache and test again
+    print 'clear cache'
+    ls.uncache(name)
     
-    # dismiss everything on and before Feb 14
-    feb14 = calendar.timegm(time.strptime('20130214', '%Y%m%d'))
-    ls.setDismissed(name, feb14, prior=True)
-    r = ls.retrieve(name, feb14)
-    assert r == None, 'Dismissed record is not dismissed'
-    jan10 = calendar.timegm(time.strptime('20130110', '%Y%m%d'))
-    r = ls.retrieve(name, jan10)
-    assert r == None, 'Dismissed record is not dismissed'
-    
-    # seen on June 1
-    jun1 = calendar.timegm(time.strptime('20130601', '%Y%m%d'))
-    ls.setSeen(name, jun1, prior=False)
-    r = ls.retrieve(name, jun1)
-    assert r and r['seen'], 'Seen record is not seen'
-    
-    # set everything seen on and before March 14
-    mar14 = calendar.timegm(time.strptime('20130314', '%Y%m%d'))
-    ls.setSeen(name, mar14, prior=True)
-
-    # verify
-    for i in xrange(365):
-        t = start + i * 24 * 60 * 60
-        r = ls.retrieve(name, t)
-
-        if t <= feb14 or t == mar31:
-            assert r == None, 'Dismissed record is not dismissed'
-            continue
-
-        assert r != None, 'Non-dismissed record is not found'
-
-        if t <= mar14 or t == jun1:
-            assert r['seen'], 'Seen record is not seen'
-            continue
-
-        assert not r['seen'], 'Not-seen record is seen'
+    # reverse scan
+    print 'test reverse scan again'
+    testReverseScan()
