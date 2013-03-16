@@ -311,7 +311,6 @@ class ListStore:
         out = []
         for i in xrange(i, -1, -1):
             yyyymm = ip.ymtab[i]['yyyymm']
-            print yyyymm
             if limit <= 0: break
             if skipDismissed and ip.ymtab[i]['total'] == ip.ymtab[i]['dismissed']:
                 continue
@@ -333,22 +332,21 @@ class ListStore:
                     continue
                 limit = limit - 1
                 out += [r]
-                print 'len', len(out)
 
         return out
 
     ### ------------------------------------------
-    def reset(self, name):
+    def deleteName(self, name):
         bkt = self.__s3_bucket_handle()
         rs = bkt.list(name)
         for key in rs:
             # print 'deleting', key
             bkt.delete_key(key)
             self.__rdelete(key.name)
-        self.uncache(name)
+        self.clearCache(name)
 
     ### ------------------------------------------
-    def uncache(self, name):
+    def clearCache(self, name):
         self.__rdelete('liststore::' + name + '.gz')
         keys = self.__rconn().keys('liststore::' + name + '/*.gz')
         # print keys
@@ -382,8 +380,7 @@ if __name__ == '__main__':
     aug23 = calendar.timegm(time.strptime('20130823', '%Y%m%d'))
     
     # fresh start for test
-    ls.uncache(name)
-    ls.reset(name)
+    ls.deleteName(name)
 
     # insert one item per day for the whole year in batches of 1, 2, 4, 8, 16, 64
     def testInsert():
@@ -449,20 +446,18 @@ if __name__ == '__main__':
 
     def testReverseScan():
         out = ls.reverseScan(name, aug23, limit=300)
-        print len(out)
-        print out[-1]
         assert out[-1]['ctime'] == feb14 + 24 * 60 * 60, 'last record should be feb15'
 
         t = aug23
         for r in out:
             if t == mar31:
                 t = t - 24 * 60 * 60
-            print r
             assert r['ctime'] == t, 'Expected ctime of %s but got %s' % (t, r['ctime'])
             if t <= mar14 or t == jun1:
                 assert r['seen'], 'Seen record is not seen'
             else:
                 assert not r['seen'], 'Not-seen record is seen'
+            t = t - 24 * 60 * 60
             
 
     print 'test insert'
@@ -475,7 +470,6 @@ if __name__ == '__main__':
         print 'redo insert'
         testInsert()
 
-
     print 'test dismiss'
     testDismiss()
     print 'test seen'
@@ -483,7 +477,7 @@ if __name__ == '__main__':
     print 'verifying ...'
     verifySeenAndDismissed()
     print 'clear cache'
-    ls.uncache(name)
+    ls.clearCache(name)
     print 'verifying again ...'
     verifySeenAndDismissed()
 
@@ -493,7 +487,7 @@ if __name__ == '__main__':
 
     # clear cache and test again
     print 'clear cache'
-    ls.uncache(name)
+    ls.clearCache(name)
     
     # reverse scan
     print 'test reverse scan again'
