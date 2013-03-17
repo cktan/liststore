@@ -14,6 +14,12 @@ class DataError(Error):
         self.msg = msg
 
 ### ------------------------------------------
+class NonFutureItemError(DataError):
+    def __init__(self):
+        super(NonFutureItemError, self).__init__('new ctime must be later than known ctime')
+
+
+### ------------------------------------------
 class ListStoreIndexPage:
     def __init__(self, jsonString):
         self.ymtab = jsonString and json.loads(jsonString) or []
@@ -206,24 +212,33 @@ class ListStore:
         
 
     ### ------------------------------------------
-    def __append(self, name, yyyymm, rows):
+    def __append(self, name, yyyymm, newrows):
         # sort by ctime
-        rows.sort(key = lambda x: x[0])
+        newrows.sort(key = lambda x: x[0])
 
         ip = self.__readIndexPage(name)
         for i in xrange(len(ip.ymtab)-1, -1, -1):
             last = ip.ymtab[i]
-            if last['total'] > 0 and last['ctime_max'] >= rows[0][0]:
-                raise DataError('ctime ' + time.asctime(time.gmtime(rows[0][0])) + ' is younger than current last record')
+            if last['total'] > 0 and last['ctime_max'] >= newrows[0][0]:
+                raise NonFutureItemError()
 
         # read the page, append, and write it
         dp = self.__readDataPage(name, yyyymm)
-        for (ctime, content) in rows:
+        if len(dp.rows) and dp.rows[-1]['ctime'] >= newrows[0][0]:
+            raise NonFutureItemError()
+        for (ctime, content) in newrows:
             dp.rows += [ {'ctime':ctime, 'content':content, 'seen':0, 'dismissed':0} ]
         self.__writeDataPage(name, yyyymm, dp)
 
     ### ------------------------------------------
     def append(self, name, rows):
+        '''Append a batch of new records into the store in list
+        :name. If the list does not exist, it will be created
+        automatically.  Each record is a (:ctime, :content) tuple.  If
+        any of the new records have a ctime that is younger than last
+        known ctime for this list, a NonFutureEventError will be
+        raise.
+        '''
         # group rows by month
         g = {}
         for i in rows:
@@ -239,6 +254,7 @@ class ListStore:
 
     ### ------------------------------------------
     def delete(self, name, ctime):
+        '''Delete the record in list :name identified by :ctime.'''
         ip = self.__readIndexPage(name)
         yyyymm = unixTimeToYYYYMM(ctime)
         r = ip.find(yyyymm)
