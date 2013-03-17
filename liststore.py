@@ -299,14 +299,24 @@ class ListStore:
 
     ### ------------------------------------------
     def setSeen(self, name, ctime, prior=False):
+        '''Set the seen flag in the list :name for the record
+        identified by :ctime. If the prior flag is set, go backwards
+        chronologically and set the seen flag of all records
+        younger than :ctime as well.'''
         self.__setFlag(name, 'seen', ctime, prior)
 
     ### ------------------------------------------
     def setDismissed(self, name, ctime, prior=False):
+        '''Set the dismissed flag in the list :name for the record
+        identified by :ctime. If the prior flag is set, go backwards
+        chronologically and set the dismissed flag of all records
+        younger than :ctime as well.'''
         self.__setFlag(name, 'dismissed', ctime, prior)
 
     ### ------------------------------------------
     def retrieve(self, name, ctime):
+        '''Retrieve a record identified by :ctime in the list
+        :name. If it does not exist, return None.'''
         ip = self.__readIndexPage(name)
         yyyymm = unixTimeToYYYYMM(ctime)
         r = ip.find(yyyymm)
@@ -319,6 +329,12 @@ class ListStore:
 
     ### ------------------------------------------
     def reverseScan(self, name, ctime, limit=100, offset=0, skipSeen=0, skipDismissed=1):
+        '''Scan the list :name backwards chronologically starting from
+        :ctime. Read at most :limit records starting at :offset. If
+        skipSeen is set, include only not-seen entries. If
+        skipDismissed is set, include only non-dismissed entries. An
+        array of qualified records will be returned in descending
+        order by :ctime of each record.'''
         ip = self.__readIndexPage(name)
         yyyymm = unixTimeToYYYYMM(ctime)
         (i, found) = ip.index(yyyymm)
@@ -353,6 +369,8 @@ class ListStore:
 
     ### ------------------------------------------
     def deleteName(self, name):
+        '''Delete the list :name. All known records of the list will
+        be deleted.'''
         bkt = self.__s3_bucket_handle()
         rs = bkt.list(name)
         for key in rs:
@@ -363,6 +381,7 @@ class ListStore:
 
     ### ------------------------------------------
     def clearCache(self, name):
+        '''Drop all Redis cache of the records belonging to the :name list.'''
         self.__rdelete('liststore::' + name + '.gz')
         keys = self.__rconn().keys('liststore::' + name + '/*.gz')
         # print keys
@@ -370,6 +389,7 @@ class ListStore:
             self.__rdelete(k)
 
 if __name__ == '__main__':
+    '''Test the list store.'''
     if not os.environ.get('AWS_ACCESS_KEY'):
         sys.exit('AWS_ACCESS_KEY not set')
     if not os.environ.get('AWS_SECRET_KEY'):
