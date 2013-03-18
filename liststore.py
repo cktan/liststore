@@ -24,8 +24,8 @@ class ListStoreIndexPage:
     '''An Index Page contains these fields:
     magic: "ListStoreIndexPage"
     version: 1
-    ymtab: an array of {yyyymm, total, seen, dismissed, ctime_max} records.
-    The array is sorted by yyyymm ascending.'''
+    ymtab: htab of yyyymm ->  {yyyymm, total, seen, dismissed, ctime_max} records.
+    '''
     
     def __init__(self, jsonString):
         if jsonString:
@@ -37,25 +37,14 @@ class ListStoreIndexPage:
             if not s.get('version') == 1:
                 raise DataError('bad index page')
         else:
-            s = {'magic': 'ListStoreIndexPage', 'version': 1, 'ymtab': []}
+            s = {'magic': 'ListStoreIndexPage', 'version': 1, 'ymtab': {}}
         
-        if not isinstance(s.get('ymtab'), list):
+        if not isinstance(s.get('ymtab'), dict):
             raise DataError('bad index page')
 
         self.s = s
         self.ymtab = s['ymtab']
 
-    def index(self, yyyymm):
-        a = [r['yyyymm'] for r in self.ymtab]
-        i = bisect.bisect_left(a, yyyymm)
-        found = (i < len(self.ymtab) and self.ymtab[i]['yyyymm'] == yyyymm)
-        return (i, found)
-
-    def find(self, yyyymm):
-        (i, found) = self.index(yyyymm)
-        if found:
-            return self.ymtab[i]
-        return None
 
     def toJson(self):
         return json.dumps(self.s)
@@ -213,7 +202,7 @@ class ListStore:
     ### ------------------------------------------
     def __readDataPage(self, name, yyyymm):
         ip = self.__readIndexPage(name)
-        r = ip.find(yyyymm)
+        r = ip.ymtab.get(yyyymm)
         if not r:
             return ListStoreDataPage('')
         dp = ListStoreDataPage(self.__read(name + '/' + yyyymm))
@@ -237,11 +226,7 @@ class ListStore:
             ctime_max = calendar.timegm(time.strptime(yyyymm + '01', '%Y%m%d'))
 
         r = {'yyyymm': yyyymm, 'total': total, 'seen': seen, 'dismissed': dismissed, 'ctime_max': ctime_max}
-        (i, found) = ip.index(yyyymm)
-        if found:
-            ip.ymtab[i] = r
-        else:
-            ip.ymtab.insert(i, r)
+        ip.ymtab[yyyymm] = r
 
         # write data page to s3
         self.__write(name + '/' + yyyymm, dp.toJson())
@@ -256,9 +241,8 @@ class ListStore:
         newrows.sort(key = lambda x: x[0])
 
         ip = self.__readIndexPage(name)
-        for i in xrange(len(ip.ymtab)-1, -1, -1):
-            last = ip.ymtab[i]
-            if last['total'] > 0 and last['ctime_max'] >= newrows[0][0]:
+        for _, r in ip.ymtab.items():
+            if r['total'] > 0 and r['ctime_max'] >= newrows[0][0]:
                 raise NonFutureItemError()
 
         # read the page, append, and write it
@@ -296,7 +280,7 @@ class ListStore:
         '''Delete the record in list :name identified by :ctime.'''
         ip = self.__readIndexPage(name)
         yyyymm = unixTimeToYYYYMM(ctime)
-        r = ip.find(yyyymm)
+        r = ip.ymtab.get(yyyymm)
         if r:
             dp = self.__readDataPage(name, yyyymm)
             (i, found) = dp.index(ctime)
@@ -309,7 +293,7 @@ class ListStore:
         ip = self.__readIndexPage(name)
         yyyymm = unixTimeToYYYYMM(ctime)
         if not prior:
-            r = ip.find(yyyymm)
+            r = ip.ymtab.get(yyyymm)
             if r: 
                 dp = self.__readDataPage(name, yyyymm)
                 r = dp.find(ctime)
@@ -319,12 +303,11 @@ class ListStore:
             return
 
         # prior is True
-        (i, found) = ip.index(yyyymm)
-        if not found:
-            i = i - 1
-        for i in xrange(i, -1, -1):
-            yyyymm = ip.ymtab[i]['yyyymm']
-            dp = self.__readDataPage(name, yyyymm)
+        for i in ip.ymtab.keys():
+            if i > yyyymm: continue
+            r = ip.ymtab[i]
+            if r['total'] == r[flag]: continue
+            dp = self.__readDataPage(name, i)
             (j, found) = dp.index(ctime)
             if not found:
                 j = j - 1
@@ -334,7 +317,7 @@ class ListStore:
                     dp.ctab[j][flag] = 1
                     dirty = 1
             if dirty:
-                self.__writeDataPage(name, yyyymm, dp)
+                self.__writeDataPage(name, i, dp)
 
     ### ------------------------------------------
     def setSeen(self, name, ctime, prior=False):
@@ -358,7 +341,7 @@ class ListStore:
         :name. If it does not exist, return None.'''
         ip = self.__readIndexPage(name)
         yyyymm = unixTimeToYYYYMM(ctime)
-        r = ip.find(yyyymm)
+        r = ip.ymtab.get(yyyymm)
         if r and r['total'] > r['dismissed']:
             dp = self.__readDataPage(name, yyyymm)
             r = dp.find(ctime)
@@ -376,33 +359,31 @@ class ListStore:
         order by :ctime of each record.'''
         ip = self.__readIndexPage(name)
         yyyymm = unixTimeToYYYYMM(ctime)
-        (i, found) = ip.index(yyyymm)
-        if not found:
-            i = i - 1
         out = []
-        for i in xrange(i, -1, -1):
-            yyyymm = ip.ymtab[i]['yyyymm']
+        for i in sorted(ip.ymtab.keys(), reverse=True):
+            if i > yyyymm: continue
+            ir = ip.ymtab[i]
             if limit <= 0: break
-            if skipDismissed and ip.ymtab[i]['total'] == ip.ymtab[i]['dismissed']:
+            if skipDismissed and ir['total'] == ir['dismissed']:
                 continue
-            if skipSeen and ip.ymtab[i]['total'] == ip.ymtab[i]['seen']:
+            if skipSeen and ir['total'] == ir['seen']:
                 continue
-            dp = self.__readDataPage(name, yyyymm)
+            dp = self.__readDataPage(name, i)
             (j, found) = dp.index(ctime)
             if not found:
                 j = j - 1
             for j in xrange(j, -1, -1):
-                r = dp.ctab[j]
+                jr = dp.ctab[j]
                 if limit <= 0: break
-                if skipDismissed and r['dismissed']:
+                if skipDismissed and jr['dismissed']:
                     continue
-                if skipSeen and r['seen']:
+                if skipSeen and jr['seen']:
                     continue
                 if offset > 0:
                     offset = offset - 1
                     continue
                 limit = limit - 1
-                out += [r]
+                out += [jr]
 
         return out
 
