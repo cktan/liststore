@@ -374,19 +374,18 @@ class ListStore:
         bkt = self.__s3_bucket_handle()
         rs = bkt.list(name)
         for key in rs:
-            # print 'deleting', key
             bkt.delete_key(key)
-            self.__rdelete(key.name)
+            self.__rconn().delete(key.name)
         self.clearCache(name)
 
     ### ------------------------------------------
     def clearCache(self, name):
         '''Drop all Redis cache of the records belonging to the :name list.'''
-        self.__rdelete('liststore::' + name + '.gz')
+        self.__rconn().delete('liststore::' + name + '.gz')
         keys = self.__rconn().keys('liststore::' + name + '/*.gz')
-        # print keys
         for k in keys:
-            self.__rdelete(k)
+            self.__rconn().delete(k)
+
 
 if __name__ == '__main__':
     '''Test the list store.'''
@@ -405,8 +404,8 @@ if __name__ == '__main__':
     ls = ListStore(bucketname,
                    os.environ['AWS_ACCESS_KEY'], os.environ['AWS_SECRET_KEY'],
                    redis_host, redis_port)
-    
-    name = 'cktan'
+
+    name = 'test-list-store'
     start = calendar.timegm(time.strptime('20130101', '%Y%m%d'))
     feb14 = calendar.timegm(time.strptime('20130214', '%Y%m%d'))
     mar31 = calendar.timegm(time.strptime('20130331', '%Y%m%d'))
