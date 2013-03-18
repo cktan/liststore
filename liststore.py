@@ -21,10 +21,29 @@ class NonFutureItemError(DataError):
 
 ### ------------------------------------------
 class ListStoreIndexPage:
+    '''An Index Page contains these fields:
+    magic: "ListStoreIndexPage"
+    version: 1
+    ymtab: an array of {yyyymm, total, seen, dismissed, ctime_max} records.
+    The array is sorted by yyyymm ascending.'''
+    
     def __init__(self, jsonString):
-        self.ymtab = jsonString and json.loads(jsonString) or []
-        if not isinstance(self.ymtab, list):
+        if jsonString:
+            s = json.loads(jsonString)
+            if not isinstance(s, dict):
+                raise DataError('bad index page')
+            if not s.get('magic') == 'ListStoreIndexPage':
+                raise DataError('bad index page')
+            if not s.get('version') == 1:
+                raise DataError('bad index page')
+        else:
+            s = {'magic': 'ListStoreIndexPage', 'version': 1, 'ymtab': []}
+        
+        if not isinstance(s.get('ymtab'), list):
             raise DataError('bad index page')
+
+        self.s = s
+        self.ymtab = s['ymtab']
 
     def index(self, yyyymm):
         a = [r['yyyymm'] for r in self.ymtab]
@@ -39,29 +58,49 @@ class ListStoreIndexPage:
         return None
 
     def toJson(self):
-        return json.dumps(self.ymtab)
+        return json.dumps(self.s)
 
 
 ### ------------------------------------------
 class ListStoreDataPage:
+    '''A Data Page contains these fields:
+    magic: 'ListStoreDataPage'
+    version: 1
+    ctab: an array of {ctime, content, seen, dismissed} records.
+    The array is ordered by ctime ascending.'''
+
     def __init__(self, jsonString):
-        self.rows = jsonString and json.loads(jsonString) or []
-        if not isinstance(self.rows, list):
+        if jsonString:
+            s = json.loads(jsonString)
+            if not isinstance(s, dict):
+                raise DataError('bad data page')
+            if not s.get('magic') == 'ListStoreDataPage':
+                raise DataError('bad data page')
+            if not s.get('version') == 1:
+                raise DataError('bad data page')
+        else:
+            s = {'magic': 'ListStoreDataPage', 'version': 1, 'ctab': []}
+
+        if not isinstance(s.get('ctab'), list):
             raise DataError('bad data page')
 
+        self.s = s
+        self.ctab = s['ctab']
+
+
     def toJson(self):
-        return json.dumps(self.rows)
+        return json.dumps(self.s)
 
     def index(self, ctime):
-        cta = [r['ctime'] for r in self.rows]
+        cta = [r['ctime'] for r in self.ctab]
         i = bisect.bisect_left(cta, ctime)
-        found = (i < len(self.rows) and self.rows[i]['ctime'] == ctime)
+        found = (i < len(self.ctab) and self.ctab[i]['ctime'] == ctime)
         return (i, found)
 
     def find(self, ctime):
         (i, found) = self.index(ctime)
         if found:
-            return self.rows[i]
+            return self.ctab[i]
         return None
 
 ### ------------------------------------------
@@ -179,8 +218,8 @@ class ListStore:
             return ListStoreDataPage('')
         dp = ListStoreDataPage(self.__read(name + '/' + yyyymm))
         # fix up dp to be consistent with r
-        if len(dp.rows) > r['total']:
-            dp.rows = dp.rows[:r['total']]
+        if len(dp.ctab) > r['total']:
+            dp.ctab = dp.ctab[:r['total']]
         return dp
 
     ### ------------------------------------------
@@ -188,9 +227,9 @@ class ListStore:
         ip = self.__readIndexPage(name)
         # compute total, seen, dismissed, ctime_max
         seen, dismissed = 0, 0
-        total = len(dp.rows)
+        total = len(dp.ctab)
         ctime_max = 0
-        for i in dp.rows:
+        for i in dp.ctab:
             if i['seen']: seen = seen + 1
             if i['dismissed']: dismissed = dismissed + 1
             if ctime_max < i['ctime']: ctimeMax = i['ctime']
@@ -224,10 +263,10 @@ class ListStore:
 
         # read the page, append, and write it
         dp = self.__readDataPage(name, yyyymm)
-        if len(dp.rows) and dp.rows[-1]['ctime'] >= newrows[0][0]:
+        if len(dp.ctab) and dp.ctab[-1]['ctime'] >= newrows[0][0]:
             raise NonFutureItemError()
         for (ctime, content) in newrows:
-            dp.rows += [ {'ctime':ctime, 'content':content, 'seen':0, 'dismissed':0} ]
+            dp.ctab += [ {'ctime':ctime, 'content':content, 'seen':0, 'dismissed':0} ]
         self.__writeDataPage(name, yyyymm, dp)
 
     ### ------------------------------------------
@@ -262,7 +301,7 @@ class ListStore:
             dp = self.__readDataPage(name, yyyymm)
             (i, found) = dp.index(ctime)
             if found:
-                del dp.rows[i]
+                del dp.ctab[i]
                 self.__writeDataPage(name, yyyymm, dp)
 
     ### ------------------------------------------
@@ -291,8 +330,8 @@ class ListStore:
                 j = j - 1
             dirty = 0
             for j in xrange(j, -1, -1):
-                if not dp.rows[j][flag]:
-                    dp.rows[j][flag] = 1
+                if not dp.ctab[j][flag]:
+                    dp.ctab[j][flag] = 1
                     dirty = 1
             if dirty:
                 self.__writeDataPage(name, yyyymm, dp)
@@ -353,7 +392,7 @@ class ListStore:
             if not found:
                 j = j - 1
             for j in xrange(j, -1, -1):
-                r = dp.rows[j]
+                r = dp.ctab[j]
                 if limit <= 0: break
                 if skipDismissed and r['dismissed']:
                     continue
