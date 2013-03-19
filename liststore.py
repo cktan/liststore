@@ -387,6 +387,19 @@ class ListStore:
 
         return out
 
+
+    ### ------------------------------------------
+    def count(self, name):
+        ip = self.__readIndexPage(name)
+        total, dismissed, seen = 0, 0, 0
+        for _, r in ip.ymtab.items():
+            total += r['total']
+            dismissed += r['dismissed']
+            seen += r['seen']
+
+        return {'total':total, 'dismissed':dismissed, 'seen':seen}
+
+
     ### ------------------------------------------
     def deleteName(self, name):
         '''Delete the list :name. All known records of the list will
@@ -397,6 +410,7 @@ class ListStore:
             bkt.delete_key(key)
             self.__rconn().delete(key.name)
         self.clearCache(name)
+
 
     ### ------------------------------------------
     def clearCache(self, name):
@@ -482,6 +496,10 @@ if __name__ == '__main__':
         ls.setSeen(name, mar14, prior=True)
 
     def verifySeenAndDismissed():
+        c = ls.count(name)
+        assert c['total'] == 365, 'Wrong total count %d' % c['total']
+        assert c['seen'] == 74, 'Wrong seen count %d' % c['seen']
+        assert c['dismissed'] == 46, 'Wrong dismissed count %d' % c['dismissed']
         for i in xrange(365):
             t = start + i * 24 * 60 * 60
             r = ls.retrieve(name, t)
