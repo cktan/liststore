@@ -148,35 +148,44 @@ class ListStore:
 
     ### ------------------------------------------
     def __rconn(self):
+        '''Get a Redis connection.'''
         if not self.rconn:
             self.rconn = redis.StrictRedis(self.redis_host, self.redis_port)
         return self.rconn
     
     ### ------------------------------------------
     def __rget(self, k):
+        '''Read bytea in Redis named by key k'''
         return self.__rconn().get('liststore::' + k)
 
     ### ------------------------------------------
-    def __rset(self, k, z):
-        return self.__rconn().setex('liststore::' + k, 30 * 24 * 60 * 60, z)
+    def __rset(self, k, s):
+        '''Save key k -> bytea s in Redis. Expires in 30 days.'''
+        return self.__rconn().setex('liststore::' + k, 30 * 24 * 60 * 60, s)
 
     ### ------------------------------------------
     def __rdelete(self, k):
+        '''Delete key k in Redis.'''
         return self.__rconn().delete('liststore::' + k)
 
 
     ### ------------------------------------------
     def __write(self, k, s):
+        '''Write key k -> compressed string s in S3 and Redis.'''
         k = k + '.gz'
         kk = self.__s3_key_handle(k)
-        z = compress(s)
-        kk.set_contents_from_string(z)
+        try:
+            z = compress(s)
+            kk.set_contents_from_string(z)
         
-        # put (k, z) in redis
-        self.__rset(k, z)
+            # put (k, z) in redis
+            self.__rset(k, z)
+        finally:
+            kk.close()
 
     ### ------------------------------------------
     def __read(self, k):
+        '''Read compressed string for key k from Redis or S3.'''
         k = k + '.gz'
         z = self.__rget(k)
         if not z:
@@ -185,10 +194,12 @@ class ListStore:
                 z = kk.get_contents_as_string()
                 self.__rset(k, z)
             except boto.exception.S3ResponseError as e:
-                if e.status == 404:
+                if e.status == 404: # not found error
                     z = ''
                 else:
                     raise e
+            finally:
+                kk.close()
         return z and uncompress(z) or ''
 
     ### ------------------------------------------
