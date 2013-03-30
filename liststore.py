@@ -206,8 +206,7 @@ class ListStore:
     def __readIndexPage(self, name):
         ip = ListStoreIndexPage(self.__read(name))
         bkt = None
-        for i in ip.ymtab.keys():
-            r = ip.ymtab[i]
+        for i, r in ip.ymtab.items():
             if r['total'] == 0:
                 if not bkt:
                     bkt = self.__s3_bucket_handle()
@@ -215,7 +214,7 @@ class ListStore:
                 nkey = name + '/' + i
                 bkt.delete_key(nkey)
                 self.__rdelete(nkey)
-                del ip.ymtab[yyyymm]
+                del ip.ymtab[i]
 
         if bkt:
             self.__writeIndexPage(name, ip)
