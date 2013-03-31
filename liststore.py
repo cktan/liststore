@@ -24,7 +24,7 @@ class ListStoreIndexPage:
     '''An Index Page contains these fields:
     magic: "ListStoreIndexPage"
     version: 1
-    ymtab: htab of yyyymm ->  {yyyymm, total, seen, dismissed, persist, ctime_max} records.
+    ymtab: htab of yyyymm ->  {yyyymm, total, seen, dismissed, ctime_max} records.
     '''
     
     def __init__(self, jsonString):
@@ -55,7 +55,7 @@ class ListStoreDataPage:
     '''A Data Page contains these fields:
     magic: 'ListStoreDataPage'
     version: 1
-    ctab: an array of {ctime, content, seen, dismissed, persist} records.
+    ctab: an array of {ctime, content, seen, dismissed} records.
     The array is ordered by ctime ascending.'''
 
     def __init__(self, jsonString):
@@ -204,22 +204,7 @@ class ListStore:
 
     ### ------------------------------------------
     def __readIndexPage(self, name):
-        ip = ListStoreIndexPage(self.__read(name))
-        bkt = None
-        for i, r in ip.ymtab.items():
-            if r['total'] == 0:
-                if not bkt:
-                    bkt = self.__s3_bucket_handle()
-
-                nkey = name + '/' + i
-                bkt.delete_key(nkey)
-                self.__rdelete(nkey)
-                del ip.ymtab[i]
-
-        if bkt:
-            self.__writeIndexPage(name, ip)
-
-        return ip
+        return ListStoreIndexPage(self.__read(name))
 
     ### ------------------------------------------
     def __writeIndexPage(self, name, ip):
@@ -241,20 +226,19 @@ class ListStore:
     ### ------------------------------------------
     def __writeDataPage(self, name, yyyymm, dp):
         ip = self.__readIndexPage(name)
-        # compute total, seen, dismissed, persist, ctime_max
-        seen, dismissed, persist = 0, 0, 0
+        # compute total, seen, dismissed, ctime_max
+        seen, dismissed = 0, 0
         total = len(dp.ctab)
         ctime_max = 0
         for i in dp.ctab:
             if i['seen']: seen = seen + 1
             if i['dismissed']: dismissed = dismissed + 1
-	    if i['persist']: persist = persist + 1
             if ctime_max < i['ctime']: ctime_max = i['ctime']
         if ctime_max <= 0:
             ctime_max = calendar.timegm(time.strptime(yyyymm + '01', '%Y%m%d'))
 
         r = {'yyyymm': yyyymm, 'total': total, 
-		'seen': seen, 'dismissed': dismissed, 'persist': persist, 
+		'seen': seen, 'dismissed': dismissed, 
 		'ctime_max': ctime_max}
         ip.ymtab[yyyymm] = r
 
@@ -281,7 +265,7 @@ class ListStore:
             raise NonFutureItemError()
         for (ctime, content) in newrows:
             dp.ctab += [ {'ctime':ctime, 'content':content, 
-				'seen':0, 'dismissed':0, 'persist':0} ]
+				'seen':0, 'dismissed':0} ]
         self.__writeDataPage(name, yyyymm, dp)
 
     ### ------------------------------------------
@@ -429,16 +413,6 @@ class ListStore:
             seen += r['seen']
 
         return {'total':total, 'dismissed':dismissed, 'seen':seen}
-
-    ### ------------------------------------------
-    def purgeNonPersist(self, name):
-        ip = self.__readIndexPage(name)
-        for i, r in ip.ymtab.items():
-            if r['total'] != r['persist']:
-                dp = self.__readDataPage(name, i)
-                dp.s['ctab'] = [c for c in dp.ctab if c['persist']]
-                dp.ctab = dp.s['ctab']
-                self.__writeDataPage(name, i, dp)
 
 
     ### ------------------------------------------
