@@ -95,21 +95,15 @@ class ListStoreDataPage:
 ### ------------------------------------------
 def compress(s):
     buf = StringIO.StringIO()
-    f = gzip.GzipFile(fileobj=buf, mode='wb')
-    try:
+    with gzip.GzipFile(fileobj=buf, mode='wb') as f:
         f.write(s)
-    finally:
-        f.close()
     return buf.getvalue()
 
 ### ------------------------------------------
 def uncompress(z):
     buf = StringIO.StringIO(z)
-    f = gzip.GzipFile(fileobj=buf, mode='rb')
-    try:
+    with gzip.GzipFile(fileobj=buf, mode='rb') as f:
         s = f.read()
-    finally:
-        f.close()
     return s
 
 ### ------------------------------------------
@@ -279,14 +273,9 @@ class ListStore:
         '''
         # group rows by month
         g = {}
-        for i in rows:
-            ctime, content = i
+        for (ctime, content) in rows:
             yyyymm = unixTimeToYYYYMM(ctime)
-            a = g.get(yyyymm, False)
-            if a:
-                a.append(i)
-            else:
-                g[yyyymm] = [i]
+            g[yyyymm] = g.get(yyyymm, []) + [ (ctime, content) ]
         for yyyymm in sorted(g.keys()):
             self.__append(name, yyyymm, g[yyyymm])
 
@@ -295,8 +284,7 @@ class ListStore:
         '''Delete the record in list :name identified by :ctime.'''
         ip = self.__readIndexPage(name)
         yyyymm = unixTimeToYYYYMM(ctime)
-        r = ip.ymtab.get(yyyymm)
-        if r:
+        if ip.ymtab.get(yyyymm):
             dp = self.__readDataPage(name, yyyymm)
             (i, found) = dp.index(ctime)
             if found:
@@ -308,8 +296,7 @@ class ListStore:
         ip = self.__readIndexPage(name)
         yyyymm = unixTimeToYYYYMM(ctime)
         if not prior:
-            r = ip.ymtab.get(yyyymm)
-            if r: 
+            if ip.ymtab.get(yyyymm):
                 dp = self.__readDataPage(name, yyyymm)
                 r = dp.find(ctime)
                 if r and not r[flag]:
