@@ -166,12 +166,11 @@ class ListStore:
     ### ------------------------------------------
     def __write(self, k, s):
         '''Write key k -> compressed string s in S3 and Redis.'''
+        z = compress(s)
         k = k + '.gz'
         kk = self.__s3_key_handle(k)
         try:
-            z = compress(s)
             kk.set_contents_from_string(z)
-        
             # put (k, z) in redis
             self.__rset(k, z)
         finally:
@@ -183,18 +182,21 @@ class ListStore:
         k = k + '.gz'
         z = self.__rget(k)
         if not z:
-            kk = self.__s3_key_handle(k)
+            # cache-miss. look in s3.
+            kk = self.__s3_key_handle(k);
             try:
                 z = kk.get_contents_as_string()
                 self.__rset(k, z)
             except boto.exception.S3ResponseError as e:
                 if e.status == 404: # not found error
-                    z = ''
+                    self.__rdelete(k)
+                    return ''
                 else:
                     raise e
             finally:
                 kk.close()
-        return z and uncompress(z) or ''
+
+        return uncompress(z)
 
     ### ------------------------------------------
     def __readIndexPage(self, name):
