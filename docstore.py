@@ -83,16 +83,9 @@ class DocStore:
         return self.__rconn().delete('docstore::' + k)
 
     ### ------------------------------------------
-    def __delete(self, k, s):
-        k = k + '.gz'
-        bkt = self.__s3_bucket_handle()
-        bkt.delete_key(k)
-        self.__rdelete(k)
-
-    ### ------------------------------------------
-    def __write(self, k, s):
+    def put(self, path, id, s):
         z = compress(s)
-        k = k + '.gz'
+        k = path + '/' + id + '.gz'
         kk = self.__s3_key_handle(k);
         try:
             kk.set_contents_from_string(z)
@@ -102,8 +95,8 @@ class DocStore:
             kk.close()
 
     ### ------------------------------------------
-    def __read(self, k):
-        k = k + '.gz'
+    def get(self, path, id):
+        k = path + '/' + id + '.gz'
         z = self.__rget(k)
         if not z:
             # cache-miss. look in s3.
@@ -114,7 +107,7 @@ class DocStore:
             except boto.exception.S3ResponseError as e:
                 if e.status == 404: # not found error
                     self.__rdelete(k)
-                    return ''
+                    return None
                 else:
                     raise e
             finally:
@@ -123,31 +116,28 @@ class DocStore:
         return uncompress(z)
 
     ### ------------------------------------------
-    def put(self, path, id, s):
-        k = path + '/' + id
-        self.__write(k, s)
-
-    ### ------------------------------------------
-    def get(self, path, id):
-        k = path + '/' + id
-        return self.__read(k)
-
-    ### ------------------------------------------
     def delete(self, path, id):
-        k = path + '/' + id
-        self.__delete(k)
+        k = path + '/' + id + '.gz'
+        bkt = self.__s3_bucket_handle()
+        bkt.delete_key(k)
+        self.__rdelete(k)
 
     ### ------------------------------------------
     def list(self, path, limit):
         bkt = self.__s3_bucket_handle()
         rs = bkt.list(path)
         out = []
+        if path[-1] == '/':
+            path = path[:-1]
         for key in rs:
             if limit == 0: break
-            out += [key]
+            id = key.name[len(path)+1:]
+            id = id[:-3]  # get rid of .gz
+            out += [id]
             limit = limit - 1
         return out
 
-
-if __name__ == '__main__':
-    pass
+    ### ------------------------------------------
+    def _deleteFromCache(self, path, id):
+        k = path + '/' + id + '.gz'
+        self.__rdelete(k)

@@ -19,7 +19,7 @@ class ListStoreTest(unittest.TestCase):
         if not os.environ.get('AWS_SECRET_KEY'):
             sys.exit('AWS_SECRET_KEY not set')
             
-        Conf.bucketname = 'liststore-test'
+        Conf.bucketname = 'my-dumping-grounds'
         Conf.redis_host = 'localhost'
         Conf.redis_port = 6379
         Conf.aws_access_key = os.environ['AWS_ACCESS_KEY']
@@ -31,7 +31,7 @@ class ListStoreTest(unittest.TestCase):
                                  Conf.aws_access_key, Conf.aws_secret_key,
                                  Conf.redis_host, Conf.redis_port)
 
-        name = 'test-list-store'
+        name = 'test-liststore'
         start = calendar.timegm(time.strptime('20130101', '%Y%m%d'))
         feb14 = calendar.timegm(time.strptime('20130214', '%Y%m%d'))
         mar31 = calendar.timegm(time.strptime('20130331', '%Y%m%d'))
@@ -65,59 +65,59 @@ class ListStoreTest(unittest.TestCase):
             # print 'dismiss March 31'
             ls.setDismissed(name, mar31, prior=False)
             r = ls.retrieve(name, mar31)
-            self.assertTrue(r == None) # 'Dismissed record is not dismissed'
+            self.assertTrue(r == None, 'Dismissed record is not dismissed')
 
             # print 'dismiss everything on and before Feb 14'
             ls.setDismissed(name, feb14, prior=True)
             r = ls.retrieve(name, feb14)
-            self.assertTrue(r == None) # 'Dismissed record is not dismissed'
+            self.assertTrue(r == None, 'Dismissed record is not dismissed')
             r = ls.retrieve(name, jan10)
-            self.assertTrue(r == None) # 'Dismissed record is not dismissed'
+            self.assertTrue(r == None, 'Dismissed record is not dismissed')
 
         def doSetSeen():
             # print 'set seen on June 1'
             ls.setSeen(name, jun1, prior=False)
             r = ls.retrieve(name, jun1)
-            self.assertTrue(r and r['seen']) # 'Seen record is not seen'
+            self.assertTrue(r and r['seen'], 'Seen record is not seen')
 
             # print 'set everything seen on and before March 14'
             ls.setSeen(name, mar14, prior=True)
 
         def verifySeenAndDismissed():
             c = ls.count(name)
-            self.assertTrue(c['total'] == 365) # 'Wrong total count %d' % c['total']
-            self.assertTrue(c['seen'] == 74) # 'Wrong seen count %d' % c['seen']
-            self.assertTrue(c['dismissed'] == 46) # 'Wrong dismissed count %d' % c['dismissed']
+            self.assertTrue(c['total'] == 365, 'Wrong total count %d' % c['total'])
+            self.assertTrue(c['seen'] == 74, 'Wrong seen count %d' % c['seen'])
+            self.assertTrue(c['dismissed'] == 46, 'Wrong dismissed count %d' % c['dismissed'])
             for i in xrange(365):
                 t = start + i * 24 * 60 * 60
                 r = ls.retrieve(name, t)
 
                 if t <= feb14 or t == mar31:
-                    self.assertTrue(r == None) # 'Dismissed record is not dismissed'
+                    self.assertTrue(r == None, 'Dismissed record is not dismissed')
                     continue
 
-                self.assertTrue(r != None) # 'Non-dismissed record is not found'
+                self.assertTrue(r != None, 'Non-dismissed record is not found')
 
                 if t <= mar14 or t == jun1:
-                    self.assertTrue(r['seen']) # 'Seen record is not seen'
+                    self.assertTrue(r['seen'], 'Seen record is not seen')
                     continue
 
-                self.assertTrue(not r['seen']) #'Not-seen record is seen'
+                self.assertTrue(not r['seen'], 'Not-seen record is seen')
 
 
         def doReverseScan():
             out = ls.reverseScan(name, aug23, limit=300)
-            self.assertTrue(out[-1]['ctime'] == feb14 + 24 * 60 * 60) # 'last record should be feb15'
+            self.assertTrue(out[-1]['ctime'] == feb14 + 24 * 60 * 60, 'last record should be feb15')
 
             t = aug23
             for r in out:
                 if t == mar31:
                     t = t - 24 * 60 * 60
-                self.assertTrue(r['ctime'] == t) # 'Expected ctime of %s but got %s' % (t, r['ctime'])
+                self.assertTrue(r['ctime'] == t, 'Expected ctime of %s but got %s' % (t, r['ctime']))
                 if t <= mar14 or t == jun1:
-                    self.assertTrue(r['seen']) # 'Seen record is not seen'
+                    self.assertTrue(r['seen'], 'Seen record is not seen')
                 else:
-                    self.assertTrue(not r['seen']) # 'Not-seen record is seen'
+                    self.assertTrue(not r['seen'], 'Not-seen record is seen')
                 t = t - 24 * 60 * 60
 
 

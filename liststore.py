@@ -190,7 +190,7 @@ class ListStore:
             except boto.exception.S3ResponseError as e:
                 if e.status == 404: # not found error
                     self.__rdelete(k)
-                    return ''
+                    return None
                 else:
                     raise e
             finally:
