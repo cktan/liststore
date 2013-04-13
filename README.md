@@ -88,9 +88,9 @@ REST Interface
 We will not be doing this. But if we do, it will look like what follows.
 
 ### Append
-`HTTP: POST /ls/v1/lists/:name
 
-JSON Content: [{ ctime: X, content: Y }, … ]`
+```HTTP: POST /ls/v1/lists/:name
+JSON Content: [{ ctime: X, content: Y }, … ]```
 
 Append a new row into the store in list :name. 
 
@@ -103,35 +103,33 @@ If the list :name does not exist, it will be created automatically.
 For batch insertion, specify an array of ctime/content pairs in the body of the call.
 
 ### Deletion
-`HTTP: DELETE /ls/v1/lists/:name/ctime/:ctime
 
-JSON Content: None`
+```HTTP: DELETE /ls/v1/lists/:name/ctime/:ctime
+JSON Content: None```
 
 Delete the row in list :name identified by :ctime.
 
 ### Retrieval
-`HTTP: GET /ls/v1/lists/:name/ctime/:ctime
 
-JSON Content: None`
+```HTTP: GET /ls/v1/lists/:name/ctime/:ctime
+JSON Content: None```
 
 Retrieve the row in list :name identified by :ctime.
 
 ### List
-`HTTP: GET /ls/v1/lists/:name/ctime/:ctime?limit=:n&offset=:m
 
-JSON Content: None`
+```HTTP: GET /ls/v1/lists/:name/ctime/:ctime?limit=:n&offset=:m
+JSON Content: None```
 
 Retrieve up to :n undismissed rows starting from offset :m in the list :name where the ctime of the rows are less than or equal to :ctime. The rows are ordered in reverse chronological order based on ctime.
 
 ### Set Flags
-`HTTP: POST /ls/v1/lists/:name/ctime/:ctime
 
+```HTTP: POST /ls/v1/lists/:name/ctime/:ctime
 JSON Content: { seen: 1, dismissed: 1}
 
-
 HTTP: POST /ls/v1/lists/:name/ctime/:ctime
-
-JSON Content: { seen: 1, prior: 1 }`
+JSON Content: { seen: 1, prior: 1 }```
 
 Set the seen and/or dismissed flags of a row in list :name. If the prior flag is true, then set the flags on all rows where ctime are less than or equal to :ctime.
 
