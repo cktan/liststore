@@ -105,6 +105,7 @@ For batch insertion, specify an array of ctime/content pairs in the body of the 
 ### Deletion
 
 ```HTTP: DELETE /ls/v1/lists/:name/ctime/:ctime
+
 JSON Content: None```
 
 Delete the row in list :name identified by :ctime.
