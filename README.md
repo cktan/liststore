@@ -69,19 +69,19 @@ ctime is a timestamp in GMT. It is a floating point number representing #seconds
 Flags are boolean values denoted by 0 or 1.
 
 ### AWS
-#### S3 Data Record
-The S3 data records in the S3 bucket are keyed by a string of the form “/:name/:YYYYMM.gz”. 
+#### S3 Data Pages
 
-Each S3 data record will store an array of tuples, grouped by :name, :YYYYMM in gzip format.
+Data Records are stored in Data Pages that reside in S3 buckets. The Data Pages are keyed by a string of the form “/:name/:YYYYMM.gz”, and store arrays of tuples, grouped by (:name, :YYYYMM) in gzip format.
 
 Each tuple consists of (ctime, content, seen flag, dismissed flag).
 
-#### S3 Index Record
-The S3 index records in the S3 bucket are keyed by a string of the form “/:name.gz”.
+#### S3 Index Pages
 
-Each S3 index record will store in gzip format a dictionary { YYYYMM: (total#, dismissed#, seen#), YYYYMM:... }, identifying all S3 data records belonging to the list :name, and a count of tuples in the month YYYYMM, and of those, how many were dismissed or seen.
+Index Pages store pointers to S3 Data Pages. There is one index page per list :name, and it is keyed by a string of the form “/:name.gz”.
 
-The index records are used internally to find items belonging to a particular :name, and provide capability to only retrieve S3 data records containing items that are neither seen nor dismissed.
+Each Index Page will store in gzip format a dictionary { YYYYMM: (total#, dismissed#, seen#), YYYYMM:... }, identifying all S3 data pages belonging to the list :name, and a count of tuples in the month YYYYMM, and of those, how many were dismissed or seen.
+
+Index pages are used internally to find items belonging to a particular :name, and provide capability to only retrieve S3 data records containing items that are neither seen nor dismissed.
 
 REST Interface
 --------------
